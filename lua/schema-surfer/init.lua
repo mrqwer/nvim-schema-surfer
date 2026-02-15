@@ -235,13 +235,29 @@ function M.render_dashboard(table_name)
 end
 
 function M.open_scratchpad()
-  vim.cmd("vsplit"); local b = api.nvim_create_buf(false, true); api.nvim_set_current_buf(b)
-  api.nvim_buf_set_name(b, "Surfer Scratchpad"); api.nvim_set_option_value("filetype", "sql", { buf = b })
-  local help = { "-- 🌊 Type query, press <C-Enter> to run", "SELECT * FROM " ..
-  (next(schema_cache) or "table") .. " LIMIT 10;", "" }
+  vim.cmd("vsplit")
+  local b = api.nvim_create_buf(false, true)
+  api.nvim_set_current_buf(b)
+  api.nvim_buf_set_name(b, "Surfer Scratchpad")
+  api.nvim_set_option_value("filetype", "sql", { buf = b })
+
+  local help = {
+    "-- SQL SCRATCHPAD",
+    "-- Run: <leader>r  |  History: <leader>h",
+    "",
+    "SELECT * FROM " .. (next(schema_cache) or "table") .. " LIMIT 10;",
+    ""
+  }
   api.nvim_buf_set_lines(b, 0, -1, false, help)
-  vim.keymap.set({ "n", "i" }, "<C-CR>", M.run_scratchpad_query, { buffer = b, silent = true })
-  vim.keymap.set("n", "<leader>h", M.pick_history, { buffer = b, silent = true })
+
+  local opts = { buffer = b, silent = true }
+
+  vim.keymap.set("n", "<leader>r", M.run_scratchpad_query, opts) -- Standard "Run"
+  vim.keymap.set("n", "R", M.run_scratchpad_query, opts)         -- Quick "Refresh/Run"
+
+  vim.keymap.set({ "n", "i" }, "<C-CR>", M.run_scratchpad_query, opts)
+
+  vim.keymap.set("n", "<leader>h", M.pick_history, opts)
 end
 
 function M.run_scratchpad_query()
