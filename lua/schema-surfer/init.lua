@@ -325,10 +325,30 @@ end
 
 function M.open_scratchpad()
   vim.cmd("vsplit")
-  local b = api.nvim_create_buf(false, true)
-  api.nvim_set_current_buf(b)
-  api.nvim_buf_set_name(b, "Surfer Scratchpad")
-  api.nvim_set_option_value("filetype", "sql", { buf = b })
+  local scratch_name = "Surfer Scratchpad"
+  local existing = vim.fn.bufnr(scratch_name)
+  local b
+
+  if existing ~= -1 and api.nvim_buf_is_valid(existing) then
+    b = existing
+    api.nvim_set_current_buf(b)
+    api.nvim_set_option_value("modifiable", true, { buf = b })
+    api.nvim_buf_set_lines(b, 0, -1, false, {})
+  else
+    b = api.nvim_create_buf(false, true)
+    api.nvim_set_current_buf(b)
+    api.nvim_buf_set_name(b, scratch_name)
+  end
+
+  api.nvim_set_option_value("bufhidden", "wipe", { buf = b })
+  local ft_ok = pcall(api.nvim_set_option_value, "filetype", "sql", { buf = b })
+  if not ft_ok then
+    api.nvim_set_option_value("filetype", "text", { buf = b })
+    vim.notify(
+      "SQL filetype hook failed (likely vim-dadbod-completion without vim-dadbod). Using plain text scratchpad.",
+      vim.log.levels.WARN
+    )
+  end
 
   local help = {
     "-- SQL SCRATCHPAD",
@@ -353,7 +373,7 @@ function M.run_scratchpad_query()
   if not M.connection_string then
     vim.notify("No DB Connection", vim.log.levels.ERROR); return
   end
-  local query = table.concat(api.nvim_buf_get_lines(0, 0, -1, false), " ")
+  local query = table.concat(api.nvim_buf_get_lines(0, 0, -1, false), "\n")
   if query:match("^%s*$") then return end
   table.insert(query_history, 1, query)
   print("Executing...")
@@ -378,13 +398,26 @@ function M.show_results(rows)
   if #rows == 0 then
     vim.notify("Success (No rows)", vim.log.levels.INFO); return
   end
+
+  local function cell_to_text(value)
+    if value == nil or value == vim.NIL then return "" end
+    local text
+    if type(value) == "table" then
+      local ok, encoded = pcall(vim.json.encode, value)
+      text = ok and encoded or tostring(value)
+    else
+      text = tostring(value)
+    end
+    return text:gsub("\r\n", "\\n"):gsub("\n", "\\n"):gsub("\r", "\\r")
+  end
+
   vim.cmd("botright 15new"); local b = api.nvim_get_current_buf()
   api.nvim_set_option_value("buftype", "nofile", { buf = b }); api.nvim_set_option_value("filetype", "schema-result",
     { buf = b })
   local h = vim.tbl_keys(rows[1]); table.sort(h)
   local l = { table.concat(h, " | "), string.rep("-", 80) }
   for _, r in ipairs(rows) do
-    local v = {}; for _, k in ipairs(h) do table.insert(v, tostring(r[k] or "")) end
+    local v = {}; for _, k in ipairs(h) do table.insert(v, cell_to_text(r[k])) end
     table.insert(l, table.concat(v, " | "))
   end
   api.nvim_buf_set_lines(b, 0, -1, false, l)
