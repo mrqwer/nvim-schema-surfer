@@ -6,8 +6,9 @@ end
 vim.g.loaded_schema_surfer = 1
 
 vim.api.nvim_create_user_command("SchemaSurf", function(opts)
-  require("schema-surfer").load_schema(opts.args)
+  local uri = (opts.args and opts.args ~= "") and opts.args or nil
+  require("schema-surfer").load_schema(uri)
 end, {
-  nargs = 1,
-  desc = "Connect to DB: :SchemaSurf postgres://..."
+  nargs = "?",
+  desc = "Connect to DB (:SchemaSurf [postgres://...])"
 })
