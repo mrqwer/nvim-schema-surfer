@@ -408,7 +408,8 @@ function M.show_results(rows)
     else
       text = tostring(value)
     end
-    return text:gsub("\r\n", "\\n"):gsub("\n", "\\n"):gsub("\r", "\\r")
+    local escaped = text:gsub("\r\n", "\\n"):gsub("\n", "\\n"):gsub("\r", "\\r")
+    return escaped
   end
 
   vim.cmd("botright 15new"); local b = api.nvim_get_current_buf()
