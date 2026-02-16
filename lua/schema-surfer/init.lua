@@ -5,18 +5,103 @@ local history_stack = {}
 local click_zones = {}
 local query_history = {}
 
+M.config = {
+  db_uri = nil,
+  db_uri_env = "DATABASE_URL",
+  auto_build = true,
+  cargo_bin = "cargo",
+  engine_profile = "release",
+  engine_bin = nil,
+}
+M._build_attempted = false
+
+local function is_absolute_path(path)
+  return path:sub(1, 1) == "/" or path:match("^%a:[/\\]") ~= nil
+end
 
 local function get_plugin_root()
   local str = debug.getinfo(1, "S").source:sub(2)
   return vim.fn.fnamemodify(str, ":h:h:h")
 end
 
-local function exec_engine(args)
-  local root = get_plugin_root()
-  local bin = root .. "/engine/target/release/engine"
+local function engine_extension()
+  return (vim.fn.has("win32") == 1 and ".exe") or ""
+end
 
-  if vim.fn.filereadable(bin) == 0 then
-    vim.notify("Binary not found! Running 'cargo build --release'...", vim.log.levels.WARN)
+local function build_engine()
+  local root = get_plugin_root()
+  local manifest = root .. "/engine/Cargo.toml"
+  local cmd = { M.config.cargo_bin, "build", "--manifest-path", manifest }
+  if M.config.engine_profile ~= "debug" then table.insert(cmd, "--release") end
+
+  vim.notify("Building schema-surfer engine...", vim.log.levels.INFO)
+  local ok, output = pcall(vim.fn.system, cmd)
+  if not ok or vim.v.shell_error ~= 0 then
+    vim.notify("Engine build failed:\n" .. tostring(output), vim.log.levels.ERROR)
+    return false
+  end
+
+  return true
+end
+
+local function resolve_engine_binary()
+  local root = get_plugin_root()
+  local ext = engine_extension()
+  local profile = (M.config.engine_profile == "debug") and "debug" or "release"
+
+  if type(M.config.engine_bin) == "string" and M.config.engine_bin ~= "" then
+    local custom = M.config.engine_bin
+    if not is_absolute_path(custom) then custom = root .. "/" .. custom end
+    if vim.fn.filereadable(custom) == 1 then return custom end
+  end
+
+  local candidates = {
+    root .. "/engine/target/" .. profile .. "/schema-surfer-engine" .. ext,
+    root .. "/engine/target/" .. profile .. "/engine" .. ext, -- legacy fallback
+  }
+
+  for _, candidate in ipairs(candidates) do
+    if vim.fn.filereadable(candidate) == 1 then return candidate end
+  end
+
+  return nil
+end
+
+local function resolve_connection_string(connection_string)
+  if connection_string and connection_string ~= "" then return connection_string end
+  if type(M.config.db_uri) == "function" then
+    local ok, value = pcall(M.config.db_uri)
+    if ok and type(value) == "string" and value ~= "" then return value end
+  end
+  if type(M.config.db_uri) == "string" and M.config.db_uri ~= "" then return M.config.db_uri end
+  if type(M.config.db_uri_env) == "string" and M.config.db_uri_env ~= "" then
+    local env_value = vim.env[M.config.db_uri_env]
+    if env_value and env_value ~= "" then return env_value end
+  end
+  return nil
+end
+
+function M.setup(opts)
+  M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+  if type(M.config.connection_string) == "string" and M.config.connection_string ~= "" and
+      (not M.config.db_uri or M.config.db_uri == "") then
+    M.config.db_uri = M.config.connection_string
+  end
+end
+
+local function exec_engine(args)
+  local bin = resolve_engine_binary()
+
+  if not bin and M.config.auto_build and not M._build_attempted then
+    M._build_attempted = true
+    if build_engine() then bin = resolve_engine_binary() end
+  end
+
+  if not bin then
+    vim.notify(
+      "Schema-surfer binary not found. Run :Lazy build nvim-schema-surfer or set setup({ engine_bin = '...' }).",
+      vim.log.levels.ERROR
+    )
     return nil
   end
 
@@ -51,11 +136,15 @@ local function get_cache_path(conn)
 end
 
 function M.load_schema(connection_string, force_refresh)
-  if not connection_string or connection_string == "" then
-    vim.notify("No connection string", vim.log.levels.WARN); return
+  local conn = resolve_connection_string(connection_string)
+  if not conn then
+    vim.notify(
+      "No DB URI. Pass one to load_schema(), use :SchemaSurf <uri>, or set setup({ db_uri = '...' }).",
+      vim.log.levels.WARN
+    ); return
   end
-  M.connection_string = connection_string
-  local cache_file = get_cache_path(connection_string)
+  M.connection_string = conn
+  local cache_file = get_cache_path(conn)
 
   if not force_refresh and vim.fn.filereadable(cache_file) == 1 then
     print("Loading cache...")
@@ -66,7 +155,7 @@ function M.load_schema(connection_string, force_refresh)
   end
 
   print("Querying DB...")
-  local parsed = exec_engine({ connection_string })
+  local parsed = exec_engine({ "schema", conn })
   if not parsed then return end
 
   local f = io.open(cache_file, "w"); if f then

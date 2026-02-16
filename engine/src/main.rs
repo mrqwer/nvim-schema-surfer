@@ -1,7 +1,7 @@
 use chrono::NaiveDateTime;
 use serde::Serialize;
 use serde_json::{json, Value};
-use sqlx::{postgres::PgPoolOptions, Column, Row, TypeInfo};
+use sqlx::{postgres::PgPoolOptions, Column, Row};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
